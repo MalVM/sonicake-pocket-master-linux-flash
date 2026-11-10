@@ -27,5 +27,5 @@ if [ -n "$RAW" ]; then
     ARGS+=(--rawmidi "$RAW")
 fi
 
-exec uv run --with python-rtmidi python /home/miguel/sonicake-flash/upload.py \
+exec uv run --with python-rtmidi python ~/sonicake-pocket-master-linux-flash/upload.py \
     "$FIRMWARE" "${ARGS[@]}"
