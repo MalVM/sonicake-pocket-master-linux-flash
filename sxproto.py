@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """5868USB SysEx codec, recovered from 5868USB.dll.
 
-  sub_180095210  encoder: [crc8][count][index][type] ++ payload, nibble-expanded
+  sub_180095210  encoder: [crc8][count][index][len(payload)] ++ payload,
+                 nibble-expanded when the "expand" flag (6th arg) is nonzero.
   sub_18008fca0  receiver: same, verified with the same CRC table
-  sub_180095010  chunking: 42 B if type==0 else 19 B; terminator is F0 F7
+  sub_180095010  chunking: 42 B if not expanded else 19 B
+
+The third header byte is the payload LENGTH, not a type: sub_180095210 stores
+its 5th argument (the memcpy length) there at 0x18009525c.  The expand flag is
+the 6th argument and only selects nibble expansion (0 = raw, nonzero = expand).
 
 Importing this module self-checks the CRC table against the constants read out
 of the DLL, so a wrong table fails loudly instead of silently.
@@ -48,16 +53,24 @@ def collapse(b):
     return bytes((b[i] << 4) | b[i + 1] for i in range(0, len(b) - 1, 2))
 
 
-def frame(count, index, type_byte, payload=b""):
-    body = bytearray([0, count & 0xFF, index & 0xFF, type_byte & 0xFF])
+def frame(count, index, payload=b"", expand_body=True):
+    """Encode one SysEx frame.
+
+    Header is [crc8][count][index][len(payload)&0xFF]; byte3 is the length
+    (sub_180095210 stores its 5th argument there).  ``expand_body`` mirrors the
+    encoder's 6th argument: nonzero nibble-expands the body, zero sends raw.
+    """
+    payload = bytes(payload)
+    body = bytearray([0, count & 0xFF, index & 0xFF, len(payload) & 0xFF])
     body += bytearray(payload)
     body[0] = crc8(body[1:])
-    return b"\xF0" + expand(bytes(body)) + b"\xF7"
+    wire = expand(bytes(body)) if expand_body else bytes(body)
+    return b"\xF0" + wire + b"\xF7"
 
 
-def chunk_size(type_byte):
-    """cmove at 0x180095061: 0x2A when the type byte is zero, else 0x13."""
-    return 42 if type_byte == 0 else 19
+def chunk_size(expand_body=True):
+    """cmove at 0x180095061: 0x2A when not expanded, else 0x13."""
+    return 19 if expand_body else 42
 
 
 def terminator():
@@ -77,7 +90,7 @@ def parse(msg):
         "crc_calc": crc8(body[1:]),
         "count": body[1],
         "index": body[2],
-        "type": body[3],
+        "blen": body[3],
         "payload": body[4:],
         "len": len(body) - 4,
     }
@@ -101,9 +114,9 @@ def main(argv):
         if p is None:
             print("not a framed SysEx: %s" % line[:64])
             continue
-        print("crc=%s count=%3d index=%3d type=%#04x len=%3d %s" % (
+        print("crc=%s count=%3d index=%3d blen=%3d len=%3d %s" % (
             "ok " if p["crc_ok"] else "BAD", p["count"], p["index"],
-            p["type"], p["len"], binascii.hexlify(p["payload"][:24]).decode()))
+            p["blen"], p["len"], binascii.hexlify(p["payload"][:24]).decode()))
     return 0
 
 
