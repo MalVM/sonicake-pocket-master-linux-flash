@@ -50,7 +50,12 @@ def expand(b):
 
 
 def collapse(b):
-    return bytes((b[i] << 4) | b[i + 1] for i in range(0, len(b) - 1, 2))
+    """Inverse of expand.  Mirrors the DLL's 8-bit ``shl cl,4``: the shifted
+    high nibble is truncated to 8 bits before the OR."""
+    out = bytearray()
+    for i in range(0, len(b) - 1, 2):
+        out.append(((b[i] << 4) & 0xFF) | (b[i + 1] & 0xFF))
+    return bytes(out)
 
 
 def frame(count, index, payload=b"", expand_body=True):

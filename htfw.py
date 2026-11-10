@@ -10,7 +10,7 @@ PocketMaster_CFW0.9.8_base1.3.3 (2,125,752 B, 5 segments):
   0x06  u16      (1 in the known image)
   0x08  u32      image size == file length
   0x0C  16 B     model ("Pocket Master")
-  0x1C  u32      (0x03560156 in the known image)
+  0x1C  u32      (0x03030156 in the known image: bytes 56 01 03 03)
   0x20  u8       (0)
   0x21  u8       (0)
   0x22  u8       segment count (the DLL loop bound is byte[0x22]; 5 here)

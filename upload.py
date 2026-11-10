@@ -3,10 +3,11 @@
 
 Protocol recovered from 5868USB.dll.  The device runs a small state machine
 (sub_180092850) that is ACK-paced: after every frame it sets a "waiting" flag
-(state+0xc4) and only advances when the host reply's first decoded payload byte
-is 0 (sub_1800932f0); a nonzero byte aborts (sub_1800916a0), and no reply within
-9000 ticks also aborts.  So we send one frame and wait for a reply before the
-next.
+(state+0xc4) and only advances when the first byte of the reassembled reply
+message body is 0 (sub_1800932f0).  For a single-frame ACK that byte is
+payload[2] (payload[0] is the 0x13/0x14 ACK type).  A nonzero status aborts
+(sub_1800916a0), and no reply within 9000 ticks also aborts.  So we send one
+frame and wait for an ACK before the next.
 
 Sequence (confirmed against sub_180092850 / sub_180092240 / sub_180091f60 /
 sub_180092b70 / sub_180091cb0 / sub_180091a00):
@@ -204,7 +205,7 @@ def open_usb(vid, pid):
                 ep = next(e for e in i if not (e.bEndpointAddress & 0x80))
     if intf is None:
         sys.exit("no vendor-specific interface; the device is probably MIDI class "
-                 "-> use --transport alsa instead")
+                 "-> use --transport rawmidi instead")
     try:
         dev.detach_kernel_driver(intf.bInterfaceNumber)
     except Exception:
@@ -215,8 +216,9 @@ def open_usb(vid, pid):
 
 
 def decode_reply(msg):
-    """Decode a device reply.  The pedal sends raw bytes; the DLL receiver can
-    also be configured to nibble-collapse, so accept whichever form validates."""
+    """Decode a device reply.  The pedal's replies are nibble-expanded (same
+    encoding as our outgoing frames); raw is also accepted for robustness.
+    The DLL receiver collapses with an 8-bit ``(b[i]<<4)|b[i+1]``."""
     if len(msg) < 6 or msg[0] != 0xF0 or msg[-1] != 0xF7:
         return None
     body = msg[1:-1]

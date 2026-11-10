@@ -52,7 +52,7 @@ Header is `0x38` B, then `count` 16-byte segment records, then the data region.
 | `0x06` | u16 | `1` |
 | `0x08` | u32 | file length |
 | `0x0c` | 16 | model, NUL-padded (`Pocket Master`) |
-| `0x1c` | u32 | `0x56` + version bytes (`56 01 03 03` = 1.3.3) |
+| `0x1c` | u32 | bytes `56 01 03 03` (`b1C=0x56`, version 1.3.3; LE u32 `0x03030156`) |
 | `0x20` | u8 | `0` |
 | `0x21` | u8 | `0` |
 | `0x22` | u8 | **segment count** (`5`) |
@@ -60,12 +60,14 @@ Header is `0x38` B, then `count` 16-byte segment records, then the data region.
 | `0x24` | u32 | **payload length** (`0x206f30`) |
 | `0x28` | 16 | digest slot, zero |
 
-The reader reorders a few bytes into its struct: `struct+0x22 = file[0x27]`,
-`struct+0x23 = file[0x22]` (count), `struct+0x24 = u32 at file[0x23:0x27]`
-(a misaligned read, unused). The authoritative count is **`file[0x22]`**.
+The reader takes the count from **`file[0x22]`** (the high byte `file[0x23]`
+must be 0) and also performs a misaligned, unused u32 read at `file[0x23:0x27]`.
+The practical layout above is verified by parsing the CFW: 5 records, data at
+`0x88`, and `sum(lengths) == payload_len == file_size - 0x88`.
 
-`isRealFirmware` (`0x92640`) checks only the magic and the model string
-(case-insensitive). Everything else is carried and ignored by the DLL.
+The exported `isRealFirmware` (`0x94420`) calls the validator at `0x92640`,
+which checks only the magic and the model string (case-insensitive). Everything
+else is carried and ignored by the DLL.
 
 ### Segment record (16 B at `0x38 + i*0x10`)
 
@@ -100,10 +102,13 @@ exp: each byte -> (x>>4), (x&0x0F)      # high nibble first
 
 - CRC-8 poly `0x07`, init `0`, over bytes 1..end (table at `0x13a400`).
 - `blen` is the payload **length**, not a type.
-- Encoder `0x95210`; receiver `0x8fca0`; collapse is `(b[i]<<4)|b[i+1]` with
-  **no masking**.
+- Encoder `0x95210`; receiver `0x8fca0`; collapse is an **8-bit**
+  `(b[i]<<4)|b[i+1]` — the shifted nibble is truncated to 8 bits (matching the
+  DLL's `shl cl,4`), with no nibble masking. `sxproto.collapse()` mirrors this.
 - Chunk size (`0x95010`): **19 B** when expanded (firmware), **42 B** when raw.
 - Host sends expanded frames; the device's replies are also expanded.
+  `upload.decode_reply()` tries raw first, then expanded, accepting whichever
+  validates its CRC.
 
 ## 5. Entry builder (`0x92240`)
 
@@ -175,7 +180,10 @@ correctly dropped.
 - `sxproto.py HEXFRAME...` — decode frames; also exposes `frame()` / `parse()`.
 - `upload.py FILE --transport rawmidi [--probe] --i-understand-the-risk` —
   dry-runs by default; `--probe` sends only init and prints replies; otherwise
-  sends the full ACK-paced sequence.
+  sends the full ACK-paced sequence. `--transport alsa` (rtmidi) is kept as a
+  fallback but does not receive replies; `--transport usb` (vendor interface)
+  has no reader and would time out. `--no-ack` is debugging only and can overrun
+  the device.
 - `flash-firmware.sh` — convenience wrapper (always passes the risk flag).
 
 Dry run:
